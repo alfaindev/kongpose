@@ -1,5 +1,8 @@
 version: '3.0'
 services:
+  ###########################
+  # Kong & Kong Database #
+  ###########################
   kong-db:
     container_name: kong-db
     image: postgres:12
@@ -12,7 +15,8 @@ services:
     networks:
       - kong-net
     volumes:
-      - "kong-db-data"
+      - kong_data:/var/lib/postgresql/data
+
   kong-migration:
     image: kong:latest
     environment:
@@ -26,6 +30,23 @@ services:
       - kong-net
     depends_on:
       - kong-db
+    restart: on-failure
+
+  kong-migration-up:
+    image: kong:latest
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: "${KONG_PG_HOST}"
+      KONG_PG_DATABASE: "${KONG_PG_DATABASE}"
+      KONG_PG_USER: "${KONG_PG_USER}"
+      KONG_PG_PASSWORD: "${KONG_PG_PASSWORD}"
+    command: "kong migrations up && kong migrations finish"
+    networks:
+      - kong-net
+    depends_on:
+      - kong-db
+    restart: on-failure
+
   kong:
     container_name: kong
     image: kong:latest
@@ -41,7 +62,7 @@ services:
       KONG_ADMIN_ERROR_LOG: /dev/stderr
       KONG_ADMIN_LISTEN: "0.0.0.0:8001, 0.0.0.0:8444 ssl"
     depends_on:
-      - kong-migration
+      - kong-db
     networks:
       - kong-net
     ports:
@@ -49,47 +70,41 @@ services:
       - "8443:8443"
       - "8001:8001"
       - "8444:8444"
+    restart: on-failure
+
+  ###########################
+  # Konga & Konga Database #
+  ###########################
   konga-db:
     container_name: konga-db
-    image: postgres:12
+    image: mongo
     environment:
-      POSTGRES_DB: "${KONGA_PG_DATABASE}"
-      POSTGRES_USER: "${KONGA_PG_USER}"
-      POSTGRES_PASSWORD: "${KONGA_PG_PASSWORD}"
+      MONGO_INITDB_ROOT_USERNAME: "${KONGA_DB_USER}"
+      MONGO_INITDB_ROOT_PASSWORD: "${KONGA_DB_PASSWORD}"
+    volumes:
+      - konga_data:/data/db
     ports:
-      - "5434:5432"
+      - "27017:27017"
     networks:
       - kong-net
-    volumes:
-      - "konga-db-data"
-    depends_on:
-      - kong
-  konga-preparation:
+
+  konga:
     image: pantsel/konga:latest
-    command: "-c prepare -a postgres -u postgresql://konga@konga-db:5434/konga"
+    environment:
+      DB_ADAPTER: "${KONGA_DB_ADAPTER}"
+      DB_URI: "${KONGA_DB_URI}"
+      NODE_ENV: "${KONGA_NODE_ENV}"
+      TOKEN_SECRET: "${KONGA_TOKEN_SECRET}"
     depends_on:
       - konga-db
     networks:
       - kong-net
-  konga:
-    image: pantsel/konga:latest
-    environment:
-      DB_ADAPTER: postgres
-      DB_HOST: "${KONGA_PG_HOST}"
-      DB_DATABASE: "${KONGA_PG_DATABASE}"
-      DB_USER: "${KONGA_PG_USER}"
-      DB_PASSWORD: "${KONGA_PG_PASSWORD}"
-      NODE_ENV: "${KONGA_NODE_ENV}"
-      TOKEN_SECRET: "${KONGA_TOKEN_SECRET}"
-    depends_on:
-      - konga-preparation
-    networks:
-      - kong-net
     ports:
       - "1337:1337"
+    restart: on-failure
 volumes:
-  kong-db-data:
-  konga-db-data:
+  kong_data:
+  konga_data:
 networks:
   kong-net:
     external: true
